@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "test-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       index:
@@ -61,7 +62,9 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   publish-pypi:
-    if: inputs.index == 'pypi'
+    if: >-
+      inputs.index == 'pypi' ||
+      startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     environment:
