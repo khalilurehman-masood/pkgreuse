@@ -30,6 +30,42 @@ IGNORED_DIRECTORY_NAMES = {
     "program files (x86)",
 }
 
+# System trees cannot contain ordinary user-created virtual environments and
+# are prohibitively expensive or unsafe to traverse from a filesystem root.
+# User-bearing roots such as /home, /root, /opt, /srv, /tmp, /mnt, /media and
+# C:\\Users remain searchable.
+POSIX_ROOT_IGNORED_DIRECTORY_NAMES = {
+    "bin",
+    "boot",
+    "dev",
+    "etc",
+    "lib",
+    "lib32",
+    "lib64",
+    "libx32",
+    "lost+found",
+    "proc",
+    "run",
+    "sbin",
+    "sys",
+    "usr",
+    "var",
+}
+
+WINDOWS_ROOT_IGNORED_DIRECTORY_NAMES = {
+    "$recycle.bin",
+    "config.msi",
+    "documents and settings",
+    "msocache",
+    "perflogs",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "recovery",
+    "system volume information",
+    "windows",
+}
+
 
 IDENTITY_SCRIPT = """
 import json
@@ -63,39 +99,106 @@ def current_python_identity() -> dict[str, Any]:
     }
 
 
-def environment_python(environment: Path) -> Path:
+def environment_python(
+    environment: Path,
+    platform_name: str | None = None,
+) -> Path:
     """Return the expected Python executable inside an environment."""
-    if os.name == "nt":
+    if (platform_name or os.name) == "nt":
         return environment / "Scripts" / "python.exe"
 
     return environment / "bin" / "python"
 
 
-def environment_site_packages(environment: Path) -> Path | None:
+def environment_site_packages(
+    environment: Path,
+    platform_name: str | None = None,
+) -> Path | None:
     """Return the environment's site-packages directory when identifiable."""
-    if os.name == "nt":
+    if (platform_name or os.name) == "nt":
         candidate = environment / "Lib" / "site-packages"
         return candidate if candidate.is_dir() else None
 
-    library_directory = environment / "lib"
-
-    if not library_directory.is_dir():
-        return None
-
-    for candidate in library_directory.glob("python*/site-packages"):
-        if candidate.is_dir():
-            return candidate
+    for directory_name in ("lib", "lib64"):
+        library_directory = environment / directory_name
+        if not library_directory.is_dir():
+            continue
+        for candidate in sorted(library_directory.glob("*/site-packages")):
+            if candidate.is_dir():
+                return candidate
 
     return None
 
 
-def is_virtual_environment_directory(path: Path) -> bool:
+def is_virtual_environment_directory(
+    path: Path,
+    platform_name: str | None = None,
+) -> bool:
     """Check whether a directory has the expected virtual-environment files."""
     return (
         (path / "pyvenv.cfg").is_file()
-        and environment_python(path).is_file()
-        and environment_site_packages(path) is not None
+        and environment_python(path, platform_name).is_file()
+        and environment_site_packages(path, platform_name) is not None
     )
+
+
+def _current_filesystem_root() -> Path:
+    anchor = Path.home().anchor
+    return Path(anchor) if anchor else Path(os.path.abspath(os.sep))
+
+
+def windows_fixed_drive_roots() -> tuple[Path, ...]:
+    """Return mounted local fixed-drive roots without including network drives."""
+    try:
+        import ctypes
+
+        win_dll = vars(ctypes).get("WinDLL")
+        if win_dll is None:
+            raise AttributeError("ctypes.WinDLL is unavailable")
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        get_logical_drives = kernel32.GetLogicalDrives
+        get_logical_drives.restype = ctypes.c_uint32
+        get_drive_type = kernel32.GetDriveTypeW
+        get_drive_type.argtypes = [ctypes.c_wchar_p]
+        get_drive_type.restype = ctypes.c_uint32
+        drive_mask = int(get_logical_drives())
+        drive_fixed = 3
+        roots = tuple(
+            Path(f"{chr(ord('A') + index)}:\\")
+            for index in range(26)
+            if drive_mask & (1 << index)
+            and int(get_drive_type(f"{chr(ord('A') + index)}:\\")) == drive_fixed
+        )
+    except (AttributeError, OSError, TypeError, ValueError):
+        roots = ()
+    return roots or (_current_filesystem_root(),)
+
+
+def filesystem_roots(platform_name: str | None = None) -> tuple[Path, ...]:
+    """Return safe local roots for automatic system-wide discovery."""
+    if (platform_name or os.name) == "nt":
+        return windows_fixed_drive_roots()
+    return (Path("/"),)
+
+
+def is_filesystem_root(path: Path) -> bool:
+    """Return True when a path is the root of its filesystem namespace."""
+    return path.parent == path
+
+
+def should_skip_directory(parent: Path, name: str) -> bool:
+    """Apply global and root-only pruning without hiding user project trees."""
+    normalized_name = name.casefold()
+    if normalized_name in IGNORED_DIRECTORY_NAMES:
+        return True
+    if not is_filesystem_root(parent):
+        return False
+    root_ignored = (
+        WINDOWS_ROOT_IGNORED_DIRECTORY_NAMES
+        if os.name == "nt"
+        else POSIX_ROOT_IGNORED_DIRECTORY_NAMES
+    )
+    return normalized_name in root_ignored
 
 
 def probe_python_identity(environment: Path) -> dict[str, Any]:
@@ -193,7 +296,7 @@ def discover_environments(
                     except OSError:
                         continue
 
-                    if entry.name.casefold() in IGNORED_DIRECTORY_NAMES:
+                    if should_skip_directory(current_directory, entry.name):
                         continue
 
                     child_directories.append(Path(entry.path))
@@ -215,8 +318,8 @@ def discover_environments(
     return environments, directories_checked
 
 
-class WindowsEnvironmentScanner:
-    """EnvironmentScanner adapter for standard Windows virtual environments."""
+class FileSystemEnvironmentScanner:
+    """EnvironmentScanner adapter for standard Windows and POSIX venvs."""
 
     def discover(
         self,
@@ -225,6 +328,10 @@ class WindowsEnvironmentScanner:
     ) -> tuple[list[Path], int]:
         """Discover environments without descending into found venvs."""
         return discover_environments(roots, progress_callback=progress)
+
+
+# Retain the original import name for callers using the 0.1 pre-release API.
+WindowsEnvironmentScanner = FileSystemEnvironmentScanner
 
 
 class ScanProgress:
@@ -288,7 +395,7 @@ def create_environment_index(
 
     progress = ScanProgress()
 
-    discovered, directories_checked = WindowsEnvironmentScanner().discover(
+    discovered, directories_checked = FileSystemEnvironmentScanner().discover(
         roots,
         progress=progress.update,
     )

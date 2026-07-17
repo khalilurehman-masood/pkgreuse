@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pkgreuse.application import indexing
 from pkgreuse.application.indexing import (
     IndexInitializationService,
     TargetIndexRefreshService,
@@ -33,6 +34,36 @@ def test_missing_index_is_initialized_once(tmp_path: Path) -> None:
     assert second.initialized is False
     assert calls == [[tmp_path.resolve()]]
     assert notifications == ["missing"]
+
+
+def test_missing_index_uses_all_default_filesystem_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index_path = tmp_path / "target" / ".pkgreuse" / "index.json"
+    repository = JsonIndexRepository(index_path)
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    calls: list[list[Path]] = []
+
+    def build(roots: list[Path], target: Path):
+        calls.append(roots)
+        data = {"schema_version": 1, "packages": {}, "environments": []}
+        repository.save(data)
+        return index_path, data
+
+    monkeypatch.setattr(
+        indexing,
+        "default_scan_roots",
+        lambda: (first_root, second_root),
+    )
+    service = IndexInitializationService(repository, build, tmp_path / "target")
+
+    service.ensure()
+
+    assert calls == [[first_root.resolve(), second_root.resolve()]]
 
 
 def test_corrupt_index_is_not_overwritten(tmp_path: Path) -> None:

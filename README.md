@@ -2,9 +2,10 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-PKGReuse is an explicit Windows command-line wrapper that reuses compatible
-Python distributions already installed in other virtual environments. It can
-avoid downloading and unpacking a package when a safe local donor is available.
+PKGReuse is an explicit Windows and Linux command-line wrapper that reuses
+compatible Python distributions already installed in other virtual
+environments. It can avoid downloading and unpacking a package when a safe
+local donor is available.
 
 PKGReuse does not replace or intercept ordinary `pip` and `uv` commands. Local
 reuse is enabled only when you invoke the `pkgreuse` command.
@@ -43,10 +44,17 @@ pkgreuse uv pip install "requests>=2.31,<3"
 ```
 
 On the first prefixed installation, PKGReuse automatically creates its local
-environment index. Manual initialization is optional:
+environment index. It scans every local fixed-drive root on Windows and `/` on
+Linux, while pruning operating-system trees and skipping inaccessible paths.
+Manual initialization with narrower roots is optional and can make discovery
+faster on very large filesystems:
 
 ```powershell
 pkgreuse init C:\Users\you\Desktop
+```
+
+```bash
+pkgreuse init "$HOME/projects" /opt
 ```
 
 Useful diagnostic and planning commands include:
@@ -72,6 +80,17 @@ validation fails, files created by the transaction are rolled back.
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\scripts\check-release.ps1
+```
+
+On Linux, run the equivalent checks directly:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m mypy
+.venv/bin/python -m pytest --cov=pkgreuse
 ```
 
 The native NumPy check is opt-in because it requires a prepared compatible

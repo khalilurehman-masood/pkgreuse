@@ -14,7 +14,7 @@ from pkgreuse.application.indexing import (
     TargetIndexRefreshService,
 )
 from pkgreuse.application.indexing import (
-    default_scan_root as application_default_scan_root,
+    default_scan_roots as application_default_scan_roots,
 )
 from pkgreuse.application.installation import (
     InstallPreparationStatus,
@@ -91,9 +91,14 @@ def show_status() -> int:
     return 0
 
 
+def default_scan_roots() -> tuple[Path, ...]:
+    """Choose platform filesystem roots for automatic discovery."""
+    return application_default_scan_roots()
+
+
 def default_scan_root() -> Path:
-    """Choose the user's Desktop as the first-version default scan root."""
-    return application_default_scan_root()
+    """Return the first automatic scan root for compatibility."""
+    return default_scan_roots()[0]
 
 
 def index_initialization_service() -> IndexInitializationService:
@@ -155,7 +160,7 @@ def initialize_index(root_arguments: list[str]) -> int:
     if not require_virtual_environment():
         return 1
 
-    roots = [Path(root) for root in root_arguments] or [default_scan_root()]
+    roots = [Path(root) for root in root_arguments] or list(default_scan_roots())
 
     target_environment = Path(sys.prefix).resolve()
 
@@ -999,7 +1004,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "roots",
         nargs="*",
-        help=("Directories to scan. Defaults to the current user's Desktop."),
+        help=("Directories to scan. Defaults to all local filesystem roots."),
     )
     find_parser = commands.add_parser(
         "find",

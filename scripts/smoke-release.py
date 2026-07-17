@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import venv
@@ -17,8 +18,9 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="pkgreuse-release-") as temporary:
         environment = Path(temporary) / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
-        python = environment / "Scripts" / "python.exe"
-        executable = environment / "Scripts" / "pkgreuse.exe"
+        scripts = environment / ("Scripts" if os.name == "nt" else "bin")
+        python = scripts / ("python.exe" if os.name == "nt" else "python")
+        executable = scripts / ("pkgreuse.exe" if os.name == "nt" else "pkgreuse")
 
         subprocess.run(
             [str(python), "-m", "pip", "install", str(wheels[0])],

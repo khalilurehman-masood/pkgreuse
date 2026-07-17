@@ -6,7 +6,7 @@ reference points rather than cross-machine claims.
 
 | Measurement | Prototype reference | Initial refactor |
 | --- | ---: | ---: |
-| Initial scan | 6.8433 s | Not repeated; would rescan the user's Desktop |
+| Initial scan | 6.8433 s | Desktop-scoped prototype reference; system-root scanning varies by host |
 | Index size | Not recorded | 438,815 bytes |
 | JSON load | Included in observed lookup | 12.891 ms |
 | In-memory package lookup | About 13–38 ms observed end-to-end | 0.0127 ms |
@@ -19,6 +19,11 @@ remains within the SRS target of 50 ms, and planning remains far below the
 one-second target. A controlled before/after scan benchmark still needs a
 stable fixture tree; rescanning arbitrary user directories is not suitable for
 repeatable CI.
+
+Automatic discovery now begins at all local fixed-drive roots on Windows and
+at `/` on Linux. Known operating-system trees are pruned, inaccessible paths
+are skipped, and discovered environments are not descended into. Because user
+filesystem size varies significantly, no universal full-root timing is claimed.
 
 The application-service measurement includes repository JSON loading,
 validation, requirement parsing, and lookup. It therefore represents the

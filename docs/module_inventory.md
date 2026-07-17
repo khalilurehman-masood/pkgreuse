@@ -10,7 +10,7 @@ assignment.
 | `index.py` | Query parsing, lookup helpers, active-index compatibility API | Delegate persistence and normalization to ports/domain policy |
 | `inventory.py` | Static `.dist-info` inventory | Keep as metadata infrastructure; never import donors |
 | `resolver.py` | Local dependency closure and overlap detection | Migrate dictionary results to immutable domain plans incrementally |
-| `scanner.py` | Discovery, identity probing, indexing orchestration, progress | Split scanner adapter from application initialization over time |
+| `scanner.py` | Cross-platform root discovery, venv probing, identity filtering, indexing orchestration, progress | Split scanner adapter from application initialization over time |
 | `transfer.py` | RECORD planning, classification, transfer, rollback, validation | Preserve transaction behavior while extracting strategies and validators |
 | `domain/` | Typed values, errors, package-name and transfer policy | New architecture-neutral domain layer |
 | `ports.py` | Protocols for replaceable dependencies | New application boundary |

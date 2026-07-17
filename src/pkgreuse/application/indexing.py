@@ -23,10 +23,16 @@ InventoryReader = Callable[
 ]
 
 
+def default_scan_roots() -> tuple[Path, ...]:
+    """Return every local filesystem root used for first-use discovery."""
+    from pkgreuse.scanner import filesystem_roots
+
+    return filesystem_roots()
+
+
 def default_scan_root() -> Path:
-    """Return the default first-use discovery root."""
-    desktop = Path.home() / "Desktop"
-    return desktop.resolve() if desktop.is_dir() else Path.home().resolve()
+    """Return the first discovery root for backward compatibility."""
+    return default_scan_roots()[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +80,7 @@ class IndexInitializationService:
         except IndexNotFoundError:
             if on_missing is not None:
                 on_missing()
-            return self.initialize(roots or (default_scan_root(),))
+            return self.initialize(roots or default_scan_roots())
         return IndexInitializationResult(
             path=self.repository.path,
             data=data,
