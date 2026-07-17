@@ -1,6 +1,9 @@
 name: Publish distributions
 
 on:
+  push:
+    tags:
+      - "test-v*"
   workflow_dispatch:
     inputs:
       index:
@@ -38,7 +41,9 @@ jobs:
           path: dist/
 
   publish-testpypi:
-    if: inputs.index == 'testpypi'
+    if: >-
+      inputs.index == 'testpypi' ||
+      startsWith(github.ref, 'refs/tags/test-v')
     needs: build
     runs-on: ubuntu-latest
     environment:
