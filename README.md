@@ -44,10 +44,13 @@ pkgreuse uv pip install "requests>=2.31,<3"
 ```
 
 On the first prefixed installation, PKGReuse automatically creates its local
-environment index. It scans every local fixed-drive root on Windows and `/` on
-Linux, while pruning operating-system trees and skipping inaccessible paths.
-Manual initialization with narrower roots is optional and can make discovery
-faster on very large filesystems:
+environment index. It first uses Conda, uv, and pip discovery hints, then
+performs a two-level scan around the active project and working directory.
+Every candidate is independently validated before it can become a donor.
+
+To discover environments outside that nearby area, explicitly provide one or
+more roots. Explicit roots are scanned recursively, so they remain suitable
+for a deliberate wider inventory without a default full-disk crawl:
 
 ```powershell
 pkgreuse init C:\Users\you\Desktop

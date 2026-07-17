@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,10 +25,10 @@ InventoryReader = Callable[
 
 
 def default_scan_roots() -> tuple[Path, ...]:
-    """Return every local filesystem root used for first-use discovery."""
-    from pkgreuse.scanner import filesystem_roots
+    """Return bounded project-neighbourhood roots for first-use discovery."""
+    from pkgreuse.scanner import nearby_scan_roots
 
-    return filesystem_roots()
+    return nearby_scan_roots(Path(sys.prefix).resolve())
 
 
 def default_scan_root() -> Path:
@@ -52,13 +53,30 @@ class IndexInitializationService:
         repository: IndexRepository,
         builder: IndexBuilder,
         target_environment: Path,
+        automatic_builder: IndexBuilder | None = None,
     ) -> None:
         self.repository = repository
         self.builder = builder
         self.target_environment = target_environment
+        self.automatic_builder = automatic_builder
 
     def initialize(self, roots: Sequence[Path]) -> IndexInitializationResult:
         """Validate scan roots and build a fresh target-local index."""
+        return self._initialize_with_builder(roots, self.builder)
+
+    def initialize_default(self) -> IndexInitializationResult:
+        """Build the bounded first-use index from default discovery roots."""
+        return self._initialize_with_builder(
+            default_scan_roots(),
+            self.automatic_builder or self.builder,
+        )
+
+    def _initialize_with_builder(
+        self,
+        roots: Sequence[Path],
+        builder: IndexBuilder,
+    ) -> IndexInitializationResult:
+        """Validate roots and invoke the selected index builder."""
         resolved_roots = [root.expanduser().resolve() for root in roots]
         invalid_roots = [root for root in resolved_roots if not root.is_dir()]
         if invalid_roots:
@@ -66,7 +84,7 @@ class IndexInitializationService:
             raise ConfigurationError(
                 f"Scan root does not exist or is not a directory: {invalid}"
             )
-        path, data = self.builder(resolved_roots, self.target_environment)
+        path, data = builder(resolved_roots, self.target_environment)
         return IndexInitializationResult(path=path, data=data, initialized=True)
 
     def ensure(
@@ -80,7 +98,9 @@ class IndexInitializationService:
         except IndexNotFoundError:
             if on_missing is not None:
                 on_missing()
-            return self.initialize(roots or default_scan_roots())
+            if roots is None:
+                return self.initialize_default()
+            return self.initialize(roots)
         return IndexInitializationResult(
             path=self.repository.path,
             data=data,

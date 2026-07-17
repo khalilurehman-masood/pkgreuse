@@ -37,7 +37,11 @@ from pkgreuse.resolver import (
     target_installed_version,
     version_satisfies,
 )
-from pkgreuse.scanner import create_environment_index, environment_site_packages
+from pkgreuse.scanner import (
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    create_environment_index,
+    environment_site_packages,
+)
 from pkgreuse.transfer import (
     choose_donor,
     create_transfer_plan,
@@ -92,7 +96,7 @@ def show_status() -> int:
 
 
 def default_scan_roots() -> tuple[Path, ...]:
-    """Choose platform filesystem roots for automatic discovery."""
+    """Choose bounded project-neighbourhood roots for automatic discovery."""
     return application_default_scan_roots()
 
 
@@ -105,7 +109,16 @@ def index_initialization_service() -> IndexInitializationService:
     """Compose the target-local index initialization service."""
     target = Path(sys.prefix).resolve()
     repository = JsonIndexRepository(target / ".pkgreuse" / "index.json")
-    return IndexInitializationService(repository, create_environment_index, target)
+    return IndexInitializationService(
+        repository,
+        create_environment_index,
+        target,
+        automatic_builder=lambda roots, environment: create_environment_index(
+            roots,
+            environment,
+            max_depth=DEFAULT_NEIGHBORHOOD_DEPTH,
+        ),
+    )
 
 
 def target_refresh_service() -> TargetIndexRefreshService:
@@ -175,7 +188,12 @@ def initialize_index(root_arguments: list[str]) -> int:
     print("Scanning for Python virtual environments...")
 
     try:
-        initialized = index_initialization_service().initialize(roots)
+        service = index_initialization_service()
+        initialized = (
+            service.initialize(roots)
+            if root_arguments
+            else service.initialize_default()
+        )
     except PKGReuseError as exc:
         print(f"Error: {exc}")
         return 1
@@ -1004,7 +1022,10 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "roots",
         nargs="*",
-        help=("Directories to scan. Defaults to all local filesystem roots."),
+        help=(
+            "Directories to scan recursively. Without roots, use fast manager "
+            "hints and a two-level project-neighbourhood scan."
+        ),
     )
     find_parser = commands.add_parser(
         "find",

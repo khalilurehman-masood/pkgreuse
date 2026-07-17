@@ -86,6 +86,8 @@ print(json.dumps({
 }))
 """
 
+DEFAULT_NEIGHBORHOOD_DEPTH = 2
+
 
 def current_python_identity() -> dict[str, Any]:
     """Return the Python identity of the environment running pkgreuse."""
@@ -182,6 +184,94 @@ def filesystem_roots(platform_name: str | None = None) -> tuple[Path, ...]:
     return (Path("/"),)
 
 
+def nearby_scan_roots(target_environment: Path) -> tuple[Path, ...]:
+    """Return small project-oriented roots for the default discovery pass.
+
+    Developers commonly keep sibling projects near the active project.  These
+    roots are intentionally paired with ``DEFAULT_NEIGHBORHOOD_DEPTH`` rather
+    than being recursively scanned without a boundary.
+    """
+    candidates = (Path.cwd(), target_environment.parent, Path.cwd().parent)
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        normalized = os.path.normcase(os.path.realpath(resolved))
+        if resolved.is_dir() and normalized not in seen:
+            seen.add(normalized)
+            roots.append(resolved)
+
+    return tuple(roots)
+
+
+def _run_hint_command(command: list[str]) -> str | None:
+    """Run an optional environment-manager command without failing discovery."""
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if os.name == "nt"
+            else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def manager_environment_hints() -> dict[str, list[Path]]:
+    """Find environments reported by installed package-management tools.
+
+    Hints reduce scan cost but are never trusted on their own: candidates are
+    subsequently checked for a valid virtual-environment layout and Python
+    identity.  pip has no public environment registry; its self-check records
+    are therefore intentionally best-effort only.
+    """
+    hints: dict[str, list[Path]] = {"conda": [], "uv": [], "pip": []}
+
+    conda_output = _run_hint_command(["conda", "env", "list", "--json"])
+    if conda_output is not None:
+        try:
+            environments = json.loads(conda_output).get("envs", [])
+        except (AttributeError, json.JSONDecodeError):
+            environments = []
+        hints["conda"] = [Path(item) for item in environments if isinstance(item, str)]
+
+    uv_tool_directory = _run_hint_command(["uv", "tool", "dir"])
+    if uv_tool_directory:
+        tools_root = Path(uv_tool_directory)
+        try:
+            hints["uv"] = [child for child in tools_root.iterdir() if child.is_dir()]
+        except OSError:
+            pass
+
+    pip_cache_directory = _run_hint_command(
+        [sys.executable, "-m", "pip", "cache", "dir"]
+    )
+    if pip_cache_directory:
+        selfcheck_directory = Path(pip_cache_directory) / "selfcheck"
+        try:
+            records = selfcheck_directory.iterdir()
+            for record in records:
+                if not record.is_file():
+                    continue
+                try:
+                    key = json.loads(record.read_text(encoding="utf-8")).get("key")
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(key, str):
+                    hints["pip"].append(Path(key))
+        except OSError:
+            pass
+
+    return hints
+
+
 def is_filesystem_root(path: Path) -> bool:
     """Return True when a path is the root of its filesystem namespace."""
     return path.parent == path
@@ -262,6 +352,7 @@ def identities_match(
 def discover_environments(
     roots: list[Path],
     progress_callback: Callable[[int, int, Path], None] | None = None,
+    max_depth: int | None = None,
 ) -> tuple[list[Path], int]:
     """
     Search roots for virtual environments.
@@ -272,10 +363,10 @@ def discover_environments(
     seen_environments: set[str] = set()
     directories_checked = 0
 
-    stack = list(reversed(roots))
+    stack = [(root, 0) for root in reversed(roots)]
 
     while stack:
-        current_directory = stack.pop()
+        current_directory, depth = stack.pop()
         directories_checked += 1
 
         try:
@@ -296,6 +387,9 @@ def discover_environments(
                 # Never traverse site-packages inside a discovered environment.
                 continue
 
+            if max_depth is not None and depth >= max_depth:
+                continue
+
             with os.scandir(current_directory) as entries:
                 child_directories: list[Path] = []
 
@@ -312,7 +406,9 @@ def discover_environments(
                     child_directories.append(Path(entry.path))
 
                 # Reverse so traversal order remains natural with the stack.
-                stack.extend(reversed(child_directories))
+                stack.extend(
+                    (child, depth + 1) for child in reversed(child_directories)
+                )
 
         except (PermissionError, FileNotFoundError, NotADirectoryError, OSError):
             # Inaccessible and transient directories are skipped.
@@ -335,9 +431,14 @@ class FileSystemEnvironmentScanner:
         self,
         roots: list[Path],
         progress: Callable[[int, int, Path], None] | None = None,
+        max_depth: int | None = None,
     ) -> tuple[list[Path], int]:
         """Discover environments without descending into found venvs."""
-        return discover_environments(roots, progress_callback=progress)
+        return discover_environments(
+            roots,
+            progress_callback=progress,
+            max_depth=max_depth,
+        )
 
 
 # Retain the original import name for callers using the 0.1 pre-release API.
@@ -398,6 +499,7 @@ def save_index(index_path: Path, data: dict[str, Any]) -> None:
 def create_environment_index(
     roots: list[Path],
     target_environment: Path,
+    max_depth: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Discover environments, filter by Python identity, and save the index."""
     started_at = time.perf_counter()
@@ -408,7 +510,24 @@ def create_environment_index(
     discovered, directories_checked = FileSystemEnvironmentScanner().discover(
         roots,
         progress=progress.update,
+        max_depth=max_depth,
     )
+
+    manager_hints = manager_environment_hints()
+    seen_environments = {
+        os.path.normcase(os.path.realpath(environment)) for environment in discovered
+    }
+    hinted_candidates = 0
+    for candidates in manager_hints.values():
+        for environment in candidates:
+            if not is_virtual_environment_directory(environment):
+                continue
+            normalized = os.path.normcase(os.path.realpath(environment))
+            if normalized in seen_environments:
+                continue
+            seen_environments.add(normalized)
+            discovered.append(environment.resolve())
+            hinted_candidates += 1
 
     progress.finish(
         directories_checked=directories_checked,
@@ -498,6 +617,11 @@ def create_environment_index(
             "elapsed_seconds": round(elapsed_seconds, 4),
             "package_index_seconds": round(package_index_seconds, 4),
             "directories_checked": directories_checked,
+            "neighborhood_depth": max_depth,
+            "manager_hints": {
+                source: len(candidates) for source, candidates in manager_hints.items()
+            },
+            "manager_candidates": hinted_candidates,
             "environments_found": len(discovered),
             "compatible_environments": len(compatible_environments),
             "skipped_environments": len(skipped_environments),

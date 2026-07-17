@@ -66,6 +66,35 @@ def test_missing_index_uses_all_default_filesystem_roots(
     assert calls == [[first_root.resolve(), second_root.resolve()]]
 
 
+def test_missing_index_uses_the_bounded_automatic_builder(tmp_path: Path) -> None:
+    index_path = tmp_path / "target" / ".pkgreuse" / "index.json"
+    repository = JsonIndexRepository(index_path)
+    calls: list[str] = []
+
+    def manual_build(_roots: list[Path], _target: Path):
+        calls.append("manual")
+        data = {"schema_version": 1, "packages": {}, "environments": []}
+        repository.save(data)
+        return index_path, data
+
+    def automatic_build(_roots: list[Path], _target: Path):
+        calls.append("automatic")
+        data = {"schema_version": 1, "packages": {}, "environments": []}
+        repository.save(data)
+        return index_path, data
+
+    service = IndexInitializationService(
+        repository,
+        manual_build,
+        tmp_path / "target",
+        automatic_builder=automatic_build,
+    )
+
+    service.ensure()
+
+    assert calls == ["automatic"]
+
+
 def test_corrupt_index_is_not_overwritten(tmp_path: Path) -> None:
     index_path = tmp_path / "index.json"
     index_path.write_text("{", encoding="utf-8")

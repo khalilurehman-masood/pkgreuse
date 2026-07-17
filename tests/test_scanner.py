@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import NoReturn
@@ -113,3 +114,50 @@ def test_discovery_skips_inaccessible_directories(
 
     assert environments == [environment.resolve()]
     assert directories_checked >= 3
+
+
+def test_discovery_respects_neighbourhood_depth(tmp_path: Path) -> None:
+    platform_name = "nt" if os.name == "nt" else "posix"
+    shallow_environment = _create_environment(tmp_path, platform_name)
+    deep_root = tmp_path / "one" / "two"
+    deep_environment = _create_environment(deep_root, platform_name)
+
+    environments, _directories_checked = scanner.discover_environments(
+        [tmp_path],
+        max_depth=2,
+    )
+
+    assert shallow_environment.resolve() in environments
+    assert deep_environment.resolve() not in environments
+
+
+def test_manager_hints_use_conda_uv_and_pip_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conda_environment = tmp_path / "conda"
+    uv_tools = tmp_path / "uv-tools"
+    uv_environment = uv_tools / "demo"
+    uv_environment.mkdir(parents=True)
+    pip_cache = tmp_path / "pip-cache"
+    selfcheck = pip_cache / "selfcheck"
+    selfcheck.mkdir(parents=True)
+    (selfcheck / "record").write_text(
+        '{"key": "' + str(tmp_path / "pip-environment").replace("\\", "\\\\") + '"}',
+        encoding="utf-8",
+    )
+
+    def command_output(command: list[str]) -> str | None:
+        if command[:3] == ["conda", "env", "list"]:
+            return json.dumps({"envs": [str(conda_environment)]})
+        if command[:3] == ["uv", "tool", "dir"]:
+            return str(uv_tools)
+        return str(pip_cache)
+
+    monkeypatch.setattr(scanner, "_run_hint_command", command_output)
+
+    hints = scanner.manager_environment_hints()
+
+    assert hints["conda"] == [conda_environment]
+    assert hints["uv"] == [uv_environment]
+    assert hints["pip"] == [tmp_path / "pip-environment"]

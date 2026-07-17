@@ -2,6 +2,13 @@
 
 All notable changes to PKGReuse are documented here.
 
+## 0.1.2
+
+- Replace automatic full-filesystem discovery with fast Conda, uv, and pip
+  hints plus a two-level project-neighbourhood scan.
+- Keep explicit `pkgreuse init <root>` discovery recursive for intentional
+  wider scans.
+
 ## 0.1.1
 
 - Skip malformed or incompatible donor Python executables during discovery.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pkgreuse"
-version = "0.1.1"
+version = "0.1.2"
 description = "Reuse installed Python packages from existing virtual environments."
 readme = "README.md"
 requires-python = ">=3.10"
