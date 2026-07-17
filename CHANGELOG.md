@@ -2,6 +2,11 @@
 
 All notable changes to PKGReuse are documented here.
 
+## 0.1.1
+
+- Skip malformed or incompatible donor Python executables during discovery.
+- Prune pytest caches and the Windows per-user temporary directory from scans.
+
 ## 0.1.0
 
 - Add explicit pip and uv wrapper commands with unchanged remote fallback.

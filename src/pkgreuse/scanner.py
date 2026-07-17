@@ -20,6 +20,7 @@ from pkgreuse.inventory import build_package_index
 IGNORED_DIRECTORY_NAMES = {
     ".git",
     ".hg",
+    ".pytest_cache",
     ".svn",
     "__pycache__",
     "node_modules",
@@ -191,6 +192,10 @@ def should_skip_directory(parent: Path, name: str) -> bool:
     normalized_name = name.casefold()
     if normalized_name in IGNORED_DIRECTORY_NAMES:
         return True
+    if os.name == "nt":
+        parent_parts = tuple(part.casefold() for part in parent.parts)
+        if parent_parts[-2:] == ("appdata", "local") and normalized_name == "temp":
+            return True
     if not is_filesystem_root(parent):
         return False
     root_ignored = (
@@ -210,14 +215,19 @@ def probe_python_identity(environment: Path) -> dict[str, Any]:
     if os.name == "nt":
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-    completed = subprocess.run(
-        [str(python_executable), "-c", IDENTITY_SCRIPT],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-        creationflags=creation_flags,
-    )
+    try:
+        completed = subprocess.run(
+            [str(python_executable), "-c", IDENTITY_SCRIPT],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            creationflags=creation_flags,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not start environment Python {python_executable}: {exc}"
+        ) from exc
 
     if completed.returncode != 0:
         error = completed.stderr.strip() or "Python identity command failed."

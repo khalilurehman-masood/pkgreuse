@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -63,6 +64,32 @@ def test_root_pruning_keeps_user_bearing_directories() -> None:
     assert not scanner.should_skip_directory(root, "Users")
     assert not scanner.should_skip_directory(root, "home")
     assert not scanner.should_skip_directory(root, "opt")
+
+
+def test_pytest_cache_is_pruned() -> None:
+    assert scanner.should_skip_directory(Path.cwd(), ".pytest_cache")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows-specific temporary path")
+def test_windows_temp_tree_is_pruned() -> None:
+    parent = Path("C:/Users/tester/AppData/Local")
+
+    assert scanner.should_skip_directory(parent, "Temp")
+
+
+def test_invalid_environment_python_is_reported_as_skippable_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = tmp_path / "broken"
+
+    def failing_run(*_args: object, **_kwargs: object) -> NoReturn:
+        raise OSError(216, "not compatible")
+
+    monkeypatch.setattr(scanner.subprocess, "run", failing_run)
+
+    with pytest.raises(RuntimeError, match="Could not start environment Python"):
+        scanner.probe_python_identity(environment)
 
 
 def test_discovery_skips_inaccessible_directories(
