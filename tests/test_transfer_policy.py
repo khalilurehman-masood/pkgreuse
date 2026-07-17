@@ -70,27 +70,43 @@ def test_launchers_are_skipped(
     assert all("demo.exe" not in item["destination"] for item in plan["planned_files"])
 
 
-@pytest.mark.parametrize(
-    "content",
-    ["import os\n", "C:\\donor\\Lib\\site-packages\n"],
-)
 def test_unsafe_pth_blocks_reuse(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     distribution_factory,
-    content: str,
 ) -> None:
     candidate = distribution_factory(
         "donor",
         "demo",
         "1.0",
-        {"demo.pth": content},
+        {"demo.pth": "import os\n"},
     )
     _configure_target(monkeypatch, tmp_path / "target")
     plan = transfer.create_transfer_plan("demo", "1.0", [candidate])
     assert plan["invalid_pth_files"] == ["demo.pth"]
     with pytest.raises(RuntimeError, match="unsafe .pth"):
         transfer.execute_transfer_plan(plan)
+
+
+def test_absolute_donor_pth_blocks_reuse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    distribution_factory,
+) -> None:
+    candidate = distribution_factory(
+        "donor",
+        "demo",
+        "1.0",
+        {"demo.pth": "placeholder\n"},
+    )
+    donor_path = Path(candidate["environment"]) / "shared"
+    pth_path = Path(candidate["site_packages"]) / "demo.pth"
+    pth_path.write_text(f"{donor_path}\n", encoding="utf-8")
+    _configure_target(monkeypatch, tmp_path / "target")
+
+    plan = transfer.create_transfer_plan("demo", "1.0", [candidate])
+
+    assert plan["invalid_pth_files"] == ["demo.pth"]
 
 
 def test_record_path_traversal_is_rejected(

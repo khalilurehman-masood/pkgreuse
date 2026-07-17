@@ -8,12 +8,13 @@ from pkgreuse.infrastructure.backends import PipBackend, UvBackend
 
 
 def test_pip_backend_targets_interpreter() -> None:
+    target_python = Path("target") / "bin" / "python"
     command = PipBackend().command(
-        Path("C:/target/Scripts/python.exe"),
+        target_python,
         ["install", "demo==1"],
     )
     assert command == [
-        "C:\\target\\Scripts\\python.exe",
+        str(target_python),
         "-m",
         "pip",
         "install",
@@ -22,13 +23,14 @@ def test_pip_backend_targets_interpreter() -> None:
 
 
 def test_uv_backend_targets_interpreter() -> None:
+    target_python = Path("target") / "bin" / "python"
     command = UvBackend("C:/tools/uv.exe").command(
-        Path("C:/target/Scripts/python.exe"),
+        target_python,
         ["install", "demo==1"],
     )
     assert command[0:3] == ["C:/tools/uv.exe", "pip", "install"]
     assert "--python" in command
-    assert "C:\\target\\Scripts\\python.exe" in command
+    assert str(target_python) in command
 
 
 def test_uv_backend_reports_missing_executable(
